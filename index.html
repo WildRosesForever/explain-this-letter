@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Explain This Letter</title>
+  <meta name="description" content="Paste a letter or email. Get a plain-English explanation and what to do next." />
+</head>
+<body style="font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;max-width:900px;margin:24px auto;padding:0 12px;color:#111;">
+
+  <h1 style="margin:0 0 8px;">Explain This Letter</h1>
+  <p style="margin:0 0 16px;color:#444;">
+    Paste a letter or email. Get a clear, plain-English explanation and what to do next.
+  </p>
+
+  <div style="border:1px solid #ddd;border-radius:12px;padding:16px;">
+    <label style="font-weight:600;">Paste text</label>
+    <textarea id="text" rows="10"
+      style="width:100%;padding:12px;margin:8px 0 12px;font-size:14px;"
+      placeholder="Paste the letter/email here..."></textarea>
+
+    <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;">
+      <label style="display:flex;gap:6px;align-items:center;">
+        <input type="radio" name="tone" value="short" checked /> Short
+      </label>
+      <label style="display:flex;gap:6px;align-items:center;">
+        <input type="radio" name="tone" value="detailed" /> Detailed
+      </label>
+
+      <button id="go" style="padding:10px 14px;border-radius:8px;border:1px solid #ccc;background:#fff;cursor:pointer;">
+        Explain
+      </button>
+      <button id="copy" disabled
+        style="padding:10px 14px;border-radius:8px;border:1px solid #ccc;background:#f6f6f6;cursor:pointer;">
+        Copy result
+      </button>
+
+      <span id="status" style="color:#555;"></span>
+    </div>
+  </div>
+
+  <div id="resultWrap"
+    style="display:none;margin-top:18px;border:1px solid #eee;border-radius:12px;padding:16px;">
+    <h2 style="margin:0 0 12px;">Result</h2>
+
+    <section style="margin-bottom:14px;">
+      <div style="font-weight:700;margin-bottom:6px;">What it means</div>
+      <div id="meaning"></div>
+    </section>
+
+    <section style="margin-bottom:14px;">
+      <div style="font-weight:700;margin-bottom:6px;">What you need to do</div>
+      <div id="actions"></div>
+    </section>
+
+    <section style="margin-bottom:14px;">
+      <div style="font-weight:700;margin-bottom:6px;">Deadlines / dates</div>
+      <div id="deadlines"></div>
+    </section>
+
+    <section style="margin-bottom:14px;">
+      <div style="font-weight:700;margin-bottom:6px;">If you do nothing</div>
+      <div id="consequences"></div>
+    </section>
+
+    <section style="margin-bottom:14px;">
+      <div style="font-weight:700;margin-bottom:6px;">Suggested reply</div>
+      <div id="reply"></div>
+    </section>
+
+    <section>
+      <div style="font-weight:700;margin-bottom:6px;">Questions (if needed)</div>
+      <div id="questions"></div>
+    </section>
+  </div>
+
+  <p style="margin-top:18px;color:#666;font-size:13px;">
+    Tip: Remove personal details before pasting sensitive content.
+  </p>
+
+  <script>
+    // Same-domain endpoint on Vercel
+    const ENDPOINT = "/api/explain";
+
+    const $ = (id) => document.getElementById(id);
+    const statusEl = $("status");
+    const copyBtn = $("copy");
+
+    function toneValue() {
+      return document.querySelector('input[name="tone"]:checked').value;
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replaceAll("&","&amp;")
+        .replaceAll("<","&lt;")
+        .replaceAll(">","&gt;")
+        .replaceAll('"',"&quot;")
+        .replaceAll("'","&#039;");
+    }
+
+    function toHtml(text) {
+      if (!text) return "";
+      const lines = String(text).split("\n").map(l => l.trim()).filter(Boolean);
+      if (lines.some(l => l.startsWith("-"))) {
+        return "<ul>" + lines.map(l =>
+          l.startsWith("-")
+            ? `<li>${escapeHtml(l.slice(1).trim())}</li>`
+            : `<li>${escapeHtml(l)}</li>`
+        ).join("") + "</ul>";
+      }
+      return `<div>${escapeHtml(text)}</div>`;
+    }
+
+    function render(data) {
+      $("meaning").innerHTML = toHtml(data.meaning);
+      $("actions").innerHTML = toHtml(data.actions);
+      $("deadlines").innerHTML = toHtml(data.deadlines);
+      $("consequences").innerHTML = toHtml(data.consequences);
+      $("reply").innerHTML = toHtml(data.suggested_reply);
+      $("questions").innerHTML = toHtml(data.questions);
+
+      $("resultWrap").style.display = "block";
+
+      window._copyText =
+`WHAT IT MEANS:
+${data.meaning}
+
+WHAT YOU NEED TO DO:
+${data.actions}
+
+DEADLINES:
+${data.deadlines}
+
+IF YOU DO NOTHING:
+${data.consequences}
+
+SUGGESTED REPLY:
+${data.suggested_reply}
+
+QUESTIONS:
+${data.questions}
+`;
+      copyBtn.disabled = false;
+      copyBtn.style.background = "#fff";
+    }
+
+    $("go").addEventListener("click", async () => {
+      const text = $("text").value;
+
+      statusEl.textContent = "";
+      copyBtn.disabled = true;
+      copyBtn.style.background = "#f6f6f6";
+      $("resultWrap").style.display = "none";
+
+      if (!text || text.trim().length < 30) {
+        statusEl.textContent = "Please paste a bit more text.";
+        return;
+      }
+
+      statusEl.textContent = "Working…";
+
+      try {
+        const r = await fetch(ENDPOINT, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, tone: toneValue() })
+        });
+
+        const j = await r.json();
+
+        if (!r.ok || !j.ok) {
+          statusEl.textContent = "Error.";
+          console.error(j);
+          return;
+        }
+
+        render(j.data);
+        statusEl.textContent = "Done.";
+      } catch (e) {
+        statusEl.textContent = "Network error.";
+        console.error(e);
+      }
+    });
+
+    copyBtn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(window._copyText || "");
+        statusEl.textContent = "Copied.";
+      } catch {
+        statusEl.textContent = "Copy failed.";
+      }
+    });
+  </script>
+</body>
+</html>
