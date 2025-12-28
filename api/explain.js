@@ -11,6 +11,24 @@ function setCors(res) {
 
 export default async function handler(req, res) {
   setCors(res);
+  function extractJson(raw) {
+  if (!raw || typeof raw !== "string") return "";
+
+  let s = raw.trim();
+
+  // Remove ```json ... ``` or ``` ... ``` fences
+  s = s.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
+
+  // If model added extra text, try to slice from first { to last }
+  const first = s.indexOf("{");
+  const last = s.lastIndexOf("}");
+  if (first !== -1 && last !== -1 && last > first) {
+    s = s.slice(first, last + 1);
+  }
+
+  return s.trim();
+}
+
 
   if (req.method === "OPTIONS") return res.status(204).end();
   if (req.method !== "POST") return res.status(405).json({ error: "Use POST" });
@@ -67,8 +85,19 @@ TEXT:
     try {
       data = JSON.parse(raw);
     } catch {
-      return res.status(500).json({ error: "Model did not return valid JSON", raw });
-    }
+  // Retry after stripping code fences and any surrounding text
+  const cleaned = extractJson(raw);
+  try {
+    data = JSON.parse(cleaned);
+  } catch {
+    return res.status(500).json({
+      error: "Model did not return valid JSON",
+      raw,
+      cleaned
+    });
+  }
+}
+
 
     return res.status(200).json({ ok: true, data });
   } catch (e) {
